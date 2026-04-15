@@ -36,13 +36,12 @@
         <button id="btn-mix">Mixar Camadas (MP4)</button>
     </div>
    
-    <div id="status-msg">Aguardando câmera...</div>
+    <div id="status-msg">Iniciando sistema...</div>
     <div id="layers-container"></div>
 
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js"></script>
     <script>
         const { createFFmpeg, fetchFile } = FFmpeg;
-        // Configuração explícita para o GitHub Pages
         const ffmpeg = createFFmpeg({
             log: true,
             corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
@@ -53,28 +52,21 @@
         const btnStart = document.getElementById('btn-start'), btnStop = document.getElementById('btn-stop'), btnMix = document.getElementById('btn-mix');
         const statusMsg = document.getElementById('status-msg');
 
-        // Inicializar câmera
+        // Acesso à câmera e microfone
         navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(s => {
             livePreview.srcObject = s;
-            statusMsg.innerText = "Pronto para gravar.";
-            mediaRecorder = new MediaRecorder(s, { mimeType: 'video/webm' });
+            statusMsg.innerText = "Câmera ativa. Pronto para gravar.";
+            mediaRecorder = new MediaRecorder(s, { mimeType: 'video/webm;codecs=vp8,opus' });
             mediaRecorder.ondataavailable = e => { if(e.data.size > 0) recordedChunks.push(e.data); };
             mediaRecorder.onstop = () => {
-                const blob = new Blob(recordedChunks, {type:'video/webm'});
-                addLayer(blob);
+                addLayer(new Blob(recordedChunks, {type:'video/webm'}));
                 recordedChunks = [];
             };
-        }).catch(err => {
-            statusMsg.innerText = "Câmera desativada. Use apenas Upload.";
-            console.error(err);
-        });
+        }).catch(() => { statusMsg.innerText = "Erro: Câmera não encontrada."; });
 
-        // Upload de arquivos
+        // Upload de arquivos externos
         document.getElementById('file-upload').onchange = e => {
-            if(e.target.files[0]) {
-                addLayer(e.target.files[0]);
-                statusMsg.innerText = "Arquivo carregado.";
-            }
+            if(e.target.files[0]) addLayer(e.target.files[0]);
         };
 
         function addLayer(blob) {
@@ -90,6 +82,7 @@
             `;
             layersContainer.appendChild(card);
             if(layerBlobs.length >= 2) btnMix.style.display = "inline-block";
+            statusMsg.innerText = `Track ${idx+1} adicionada.`;
         }
 
         window.updateVol = (i, el) => {
@@ -101,74 +94,62 @@
             document.querySelectorAll('.player').forEach(p => { p.currentTime = 0; p.play(); });
             mediaRecorder.start();
             btnStart.disabled = true; btnStop.disabled = false;
-            statusMsg.innerText = "Gravando... Toque agora!";
+            statusMsg.innerText = "Gravando sincronizado...";
         };
 
         btnStop.onclick = () => {
             mediaRecorder.stop();
             document.querySelectorAll('.player').forEach(p => p.pause());
             btnStart.disabled = false; btnStop.disabled = true;
-            statusMsg.innerText = "Camada processada.";
         };
 
-        // Mixagem com tratamento de erro detalhado
+        // Mixagem com alta compatibilidade (AAC + YUV420P)
         btnMix.onclick = async () => {
-            btnMix.innerText = "Carregando Motor...";
-            btnMix.disabled = true;
-            statusMsg.innerText = "Iniciando FFmpeg...";
+            btnMix.innerText = "Carregando Motor..."; btnMix.disabled = true;
+            statusMsg.innerText = "Iniciando processamento...";
 
             try {
                 if (!ffmpeg.isLoaded()) await ffmpeg.load();
                
-                statusMsg.innerText = "Preparando trilhas...";
                 let aFilter = "", aLabels = "", vInputs = "";
                 const num = layerBlobs.length;
 
                 for (let i = 0; i < num; i++) {
-                    const fileName = `i${i}.webm`;
-                    ffmpeg.FS('writeFile', fileName, await fetchFile(layerBlobs[i]));
+                    const name = `i${i}.webm`;
+                    ffmpeg.FS('writeFile', name, await fetchFile(layerBlobs[i]));
                     vInputs += `[${i}:v]`;
                     aFilter += `[${i}:a]volume=${layerVolumes[i]}[a${i}];`;
                     aLabels += `[a${i}]`;
                 }
 
-                // Layout de vídeo inteligente
-                let vFilter = "";
-                if (num === 2) {
-                    vFilter = "[0:v][1:v]hstack=inputs=2[v]";
-                } else {
-                    vFilter = `${vInputs}xstack=inputs=${num}:layout=0_0|w0_0|0_h0|w0_h0[v]`;
-                }
-
+                let vFilter = num === 2 ? "[0:v][1:v]hstack=inputs=2[v]" : `${vInputs}xstack=inputs=${num}:layout=0_0|w0_0|0_h0|w0_h0[v]`;
                 const filterComplex = `${aFilter}${aLabels}amix=inputs=${num}[a];${vFilter}`;
                
-                statusMsg.innerText = "Mixando áudio e vídeo (isso pode demorar)...";
-               
+                statusMsg.innerText = "Renderizando vídeo final (MP4)...";
+
                 await ffmpeg.run(
                     ...Array.from({length: num}, (_, i) => ['-i', `i${i}.webm`]).flat(),
                     '-filter_complex', filterComplex,
-                    '-map', '[v]',
-                    '-map', '[a]',
-                    '-c:v', 'libx264',
-                    '-preset', 'ultrafast',
-                    '-crf', '28',
+                    '-map', '[v]', '-map', '[a]',
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+                    '-pix_fmt', 'yuv420p',    // Essencial para Windows e QuickTime
+                    '-c:a', 'aac',            // Áudio universal
+                    '-b:a', '128k',           // Bitrate de áudio padrão
+                    '-movflags', '+faststart', // Otimiza para reprodução rápida
                     'out.mp4'
                 );
 
-                statusMsg.innerText = "Finalizando arquivo...";
                 const data = ffmpeg.FS('readFile', 'out.mp4');
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(new Blob([data.buffer], {type:'video/mp4'}));
                 link.download = `guitar_colab_${Date.now()}.mp4`;
                 link.click();
-                statusMsg.innerText = "Download iniciado!";
+                statusMsg.innerText = "Download concluído!";
             } catch (e) {
-                console.error("ERRO NO FFMPEG:", e);
-                statusMsg.innerText = "Erro técnico. Verifique se gravou as tracks corretamente.";
-                alert("Houve um erro no processamento. Tente novamente com vídeos mais curtos.");
+                console.error(e);
+                statusMsg.innerText = "Erro na mixagem. Verifique o console.";
             } finally {
-                btnMix.innerText = "Mixar Camadas (MP4)";
-                btnMix.disabled = false;
+                btnMix.innerText = "Mixar Camadas (MP4)"; btnMix.disabled = false;
             }
         };
     </script>
