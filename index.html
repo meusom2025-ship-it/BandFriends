@@ -1,10 +1,9 @@
-
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Guitar Studio Pro - GitHub Edition</title>
+    <title>Guitar Studio Pro - @aletavaresguitar</title>
     <script src="coi-serviceworker.js"></script>
     <style>
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #121212; color: #e0e0e0; text-align: center; padding: 20px; }
@@ -21,7 +20,7 @@
         .layer-card { background: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #333; }
         .layer-card video { width: 100%; border-radius: 4px; }
         input[type=range] { width: 100%; margin-top: 10px; }
-        #status-msg { color: #f39c12; font-weight: bold; margin-top: 10px; }
+        #status-msg { color: #f39c12; font-weight: bold; margin-top: 10px; min-height: 1.5em; }
     </style>
 </head>
 <body>
@@ -37,27 +36,46 @@
         <button id="btn-mix">Mixar Camadas (MP4)</button>
     </div>
    
-    <div id="status-msg"></div>
+    <div id="status-msg">Aguardando câmera...</div>
     <div id="layers-container"></div>
 
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js"></script>
     <script>
         const { createFFmpeg, fetchFile } = FFmpeg;
-        const ffmpeg = createFFmpeg({ log: true });
+        // Configuração explícita para o GitHub Pages
+        const ffmpeg = createFFmpeg({
+            log: true,
+            corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+        });
 
         let mediaRecorder, recordedChunks = [], layerBlobs = [], layerVolumes = [];
         const livePreview = document.getElementById('live-preview'), layersContainer = document.getElementById('layers-container');
         const btnStart = document.getElementById('btn-start'), btnStop = document.getElementById('btn-stop'), btnMix = document.getElementById('btn-mix');
         const statusMsg = document.getElementById('status-msg');
 
+        // Inicializar câmera
         navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(s => {
             livePreview.srcObject = s;
+            statusMsg.innerText = "Pronto para gravar.";
             mediaRecorder = new MediaRecorder(s, { mimeType: 'video/webm' });
             mediaRecorder.ondataavailable = e => { if(e.data.size > 0) recordedChunks.push(e.data); };
-            mediaRecorder.onstop = () => { addLayer(new Blob(recordedChunks, {type:'video/webm'})); recordedChunks = []; };
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, {type:'video/webm'});
+                addLayer(blob);
+                recordedChunks = [];
+            };
+        }).catch(err => {
+            statusMsg.innerText = "Câmera desativada. Use apenas Upload.";
+            console.error(err);
         });
 
-        document.getElementById('file-upload').onchange = e => { if(e.target.files[0]) addLayer(e.target.files[0]); };
+        // Upload de arquivos
+        document.getElementById('file-upload').onchange = e => {
+            if(e.target.files[0]) {
+                addLayer(e.target.files[0]);
+                statusMsg.innerText = "Arquivo carregado.";
+            }
+        };
 
         function addLayer(blob) {
             layerBlobs.push(blob);
@@ -65,47 +83,93 @@
             layerVolumes[idx] = 1;
             const card = document.createElement('div');
             card.className = 'layer-card';
-            card.innerHTML = `<video src="${URL.createObjectURL(blob)}" controls class="player"></video>
-                              <label style="font-size:12px">Volume: 100%</label>
-                              <input type="range" min="0" max="2" step="0.1" value="1" oninput="updateVol(${idx}, this)">`;
+            card.innerHTML = `
+                <video src="${URL.createObjectURL(blob)}" controls class="player"></video>
+                <label style="font-size:12px; display:block; margin-top:10px;">Volume Track ${idx+1}: 100%</label>
+                <input type="range" min="0" max="2" step="0.1" value="1" oninput="updateVol(${idx}, this)">
+            `;
             layersContainer.appendChild(card);
             if(layerBlobs.length >= 2) btnMix.style.display = "inline-block";
         }
 
-        window.updateVol = (i, el) => { layerVolumes[i] = el.value; el.previousElementSibling.innerText = `Volume: ${Math.round(el.value*100)}%`; };
+        window.updateVol = (i, el) => {
+            layerVolumes[i] = el.value;
+            el.previousElementSibling.innerText = `Volume Track ${i+1}: ${Math.round(el.value*100)}%`;
+        };
 
         btnStart.onclick = () => {
             document.querySelectorAll('.player').forEach(p => { p.currentTime = 0; p.play(); });
             mediaRecorder.start();
             btnStart.disabled = true; btnStop.disabled = false;
-            statusMsg.innerText = "Gravando...";
+            statusMsg.innerText = "Gravando... Toque agora!";
         };
 
         btnStop.onclick = () => {
             mediaRecorder.stop();
             document.querySelectorAll('.player').forEach(p => p.pause());
             btnStart.disabled = false; btnStop.disabled = true;
-            statusMsg.innerText = "Camada adicionada.";
+            statusMsg.innerText = "Camada processada.";
         };
 
+        // Mixagem com tratamento de erro detalhado
         btnMix.onclick = async () => {
-            btnMix.innerText = "Renderizando..."; btnMix.disabled = true;
+            btnMix.innerText = "Carregando Motor...";
+            btnMix.disabled = true;
+            statusMsg.innerText = "Iniciando FFmpeg...";
+
             try {
                 if (!ffmpeg.isLoaded()) await ffmpeg.load();
+               
+                statusMsg.innerText = "Preparando trilhas...";
                 let aFilter = "", aLabels = "", vInputs = "";
-                for (let i = 0; i < layerBlobs.length; i++) {
-                    ffmpeg.FS('writeFile', `i${i}`, await fetchFile(layerBlobs[i]));
+                const num = layerBlobs.length;
+
+                for (let i = 0; i < num; i++) {
+                    const fileName = `i${i}.webm`;
+                    ffmpeg.FS('writeFile', fileName, await fetchFile(layerBlobs[i]));
                     vInputs += `[${i}:v]`;
                     aFilter += `[${i}:a]volume=${layerVolumes[i]}[a${i}];`;
                     aLabels += `[a${i}]`;
                 }
-                const vFilter = layerBlobs.length === 2 ? "[0:v][1:v]hstack=inputs=2[v]" : `${vInputs}xstack=inputs=${layerBlobs.length}:layout=0_0|w0_0|0_h0|w0_h0[v]`;
-                await ffmpeg.run(...layerBlobs.flatMap((_,i)=>['-i',`i${i}`]), '-filter_complex', `${aFilter}${aLabels}amix=inputs=${layerBlobs.length}[a];${vFilter}`, '-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-preset', 'ultrafast', 'out.mp4');
+
+                // Layout de vídeo inteligente
+                let vFilter = "";
+                if (num === 2) {
+                    vFilter = "[0:v][1:v]hstack=inputs=2[v]";
+                } else {
+                    vFilter = `${vInputs}xstack=inputs=${num}:layout=0_0|w0_0|0_h0|w0_h0[v]`;
+                }
+
+                const filterComplex = `${aFilter}${aLabels}amix=inputs=${num}[a];${vFilter}`;
+               
+                statusMsg.innerText = "Mixando áudio e vídeo (isso pode demorar)...";
+               
+                await ffmpeg.run(
+                    ...Array.from({length: num}, (_, i) => ['-i', `i${i}.webm`]).flat(),
+                    '-filter_complex', filterComplex,
+                    '-map', '[v]',
+                    '-map', '[a]',
+                    '-c:v', 'libx264',
+                    '-preset', 'ultrafast',
+                    '-crf', '28',
+                    'out.mp4'
+                );
+
+                statusMsg.innerText = "Finalizando arquivo...";
+                const data = ffmpeg.FS('readFile', 'out.mp4');
                 const link = document.createElement('a');
-                link.href = URL.createObjectURL(new Blob([ffmpeg.FS('readFile', 'out.mp4').buffer], {type:'video/mp4'}));
-                link.download = `guitar_colab.mp4`; link.click();
-            } catch (e) { console.error(e); alert("Erro na mixagem."); }
-            btnMix.innerText = "Mixar Camadas (MP4)"; btnMix.disabled = false;
+                link.href = URL.createObjectURL(new Blob([data.buffer], {type:'video/mp4'}));
+                link.download = `guitar_colab_${Date.now()}.mp4`;
+                link.click();
+                statusMsg.innerText = "Download iniciado!";
+            } catch (e) {
+                console.error("ERRO NO FFMPEG:", e);
+                statusMsg.innerText = "Erro técnico. Verifique se gravou as tracks corretamente.";
+                alert("Houve um erro no processamento. Tente novamente com vídeos mais curtos.");
+            } finally {
+                btnMix.innerText = "Mixar Camadas (MP4)";
+                btnMix.disabled = false;
+            }
         };
     </script>
 </body>
