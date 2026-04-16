@@ -3,71 +3,88 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BandFriends Studio Pro - @aletavaresguitar</title>
+    <title>Guitar Studio Pro - Flip Camera Edition</title>
     <script src="coi-serviceworker.js"></script>
     <style>
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #121212; color: #e0e0e0; text-align: center; padding: 20px; }
-        #preview-container { margin-bottom: 20px; background: #000; display: inline-block; border-radius: 12px; overflow: hidden; border: 3px solid #333; }
+        #preview-container { margin-bottom: 20px; background: #000; display: inline-block; border-radius: 12px; overflow: hidden; border: 3px solid #333; position: relative; }
         #live-preview { width: 100%; max-width: 480px; display: block; }
         .controls { margin: 20px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
-        button, .btn-upload { padding: 12px 24px; font-size: 14px; cursor: pointer; border-radius: 6px; border: none; font-weight: bold; transition: 0.3s; text-decoration: none; }
+        button, .btn-upload { padding: 12px 24px; font-size: 14px; cursor: pointer; border-radius: 6px; border: none; font-weight: bold; transition: 0.3s; }
         #btn-start { background: #28a745; color: white; }
         #btn-stop { background: #dc3545; color: white; }
+        #btn-flip { background: #555; color: white; }
         #btn-mix { background: #007bff; color: white; display: none; }
-        .btn-upload { background: #6f42c1; color: white; }
-        button:disabled { background: #444 !important; cursor: not-allowed; opacity: 0.6; }
-        #layers-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; margin-top: 30px; max-width: 1000px; margin: 30px auto; }
+        .btn-upload { background: #6f42c1; color: white; cursor: pointer; display: inline-block; }
+        button:disabled { background: #444 !important; opacity: 0.6; }
+        #layers-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; max-width: 1000px; margin: 30px auto; }
         .layer-card { background: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #333; }
         .layer-card video { width: 100%; border-radius: 4px; }
-        input[type=range] { width: 100%; margin-top: 10px; }
         #status-msg { color: #f39c12; font-weight: bold; margin-top: 10px; min-height: 1.5em; }
     </style>
 </head>
 <body>
 
-    <h1>BandFriends Studio Pro</h1>
-    <div id="preview-container"><video id="live-preview" autoplay muted playsinline></video></div>
+    <h1>Guitar Studio Pro</h1>
+    <div id="preview-container">
+        <video id="live-preview" autoplay muted playsinline></video>
+    </div>
 
     <div class="controls">
+        <button id="btn-flip">Virar Câmera 🔄</button>
         <button id="btn-start">Gravar Camada</button>
         <button id="btn-stop" disabled>Parar</button>
         <label for="file-upload" class="btn-upload">Upload Vídeo</label>
         <input type="file" id="file-upload" accept="video/*" style="display:none">
-        <button id="btn-mix">Mixar Camadas (MP4)</button>
+        <button id="btn-mix">Mixar e Baixar MP4</button>
     </div>
    
-    <div id="status-msg">Iniciando sistema...</div>
+    <div id="status-msg">Iniciando...</div>
     <div id="layers-container"></div>
 
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js"></script>
     <script>
         const { createFFmpeg, fetchFile } = FFmpeg;
-        const ffmpeg = createFFmpeg({
-            log: true,
-            corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
-        });
+        const ffmpeg = createFFmpeg({ log: true, corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js' });
 
         let mediaRecorder, recordedChunks = [], layerBlobs = [], layerVolumes = [];
+        let currentStream, currentFacingMode = 'user'; // 'user' é a frontal, 'environment' é a traseira
+
         const livePreview = document.getElementById('live-preview'), layersContainer = document.getElementById('layers-container');
-        const btnStart = document.getElementById('btn-start'), btnStop = document.getElementById('btn-stop'), btnMix = document.getElementById('btn-mix');
+        const btnStart = document.getElementById('btn-start'), btnStop = document.getElementById('btn-stop'), btnMix = document.getElementById('btn-mix'), btnFlip = document.getElementById('btn-flip');
         const statusMsg = document.getElementById('status-msg');
 
-        // Acesso à câmera e microfone
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(s => {
-            livePreview.srcObject = s;
-            statusMsg.innerText = "Câmera ativa. Pronto para gravar.";
-            mediaRecorder = new MediaRecorder(s, { mimeType: 'video/webm;codecs=vp8,opus' });
-            mediaRecorder.ondataavailable = e => { if(e.data.size > 0) recordedChunks.push(e.data); };
-            mediaRecorder.onstop = () => {
-                addLayer(new Blob(recordedChunks, {type:'video/webm'}));
-                recordedChunks = [];
-            };
-        }).catch(() => { statusMsg.innerText = "Erro: Câmera não encontrada."; });
+        async function startCamera(facingMode) {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: facingMode },
+                    audio: true
+                });
+                currentStream = stream;
+                livePreview.srcObject = stream;
+                statusMsg.innerText = `Câmera ${facingMode === 'user' ? 'Frontal' : 'Traseira'} pronta.`;
+               
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8,opus' });
+                mediaRecorder.ondataavailable = e => { if(e.data.size > 0) recordedChunks.push(e.data); };
+                mediaRecorder.onstop = () => { addLayer(new Blob(recordedChunks, {type:'video/webm'})); recordedChunks = []; };
+            } catch (err) {
+                statusMsg.innerText = "Erro ao acessar câmera.";
+                console.error(err);
+            }
+        }
 
-        // Upload de arquivos externos
-        document.getElementById('file-upload').onchange = e => {
-            if(e.target.files[0]) addLayer(e.target.files[0]);
+        // Inicia com a câmera frontal
+        startCamera(currentFacingMode);
+
+        btnFlip.onclick = () => {
+            currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+            startCamera(currentFacingMode);
         };
+
+        document.getElementById('file-upload').onchange = e => { if(e.target.files[0]) addLayer(e.target.files[0]); };
 
         function addLayer(blob) {
             layerBlobs.push(blob);
@@ -75,81 +92,83 @@
             layerVolumes[idx] = 1;
             const card = document.createElement('div');
             card.className = 'layer-card';
-            card.innerHTML = `
-                <video src="${URL.createObjectURL(blob)}" controls class="player"></video>
-                <label style="font-size:12px; display:block; margin-top:10px;">Volume Track ${idx+1}: 100%</label>
-                <input type="range" min="0" max="2" step="0.1" value="1" oninput="updateVol(${idx}, this)">
-            `;
+            card.innerHTML = `<video src="${URL.createObjectURL(blob)}" controls class="player"></video>
+                              <label style="display:block;margin-top:10px;font-size:12px">Vol: 100%</label>
+                              <input type="range" min="0" max="2" step="0.1" value="1" oninput="updateVol(${idx}, this)">`;
             layersContainer.appendChild(card);
             if(layerBlobs.length >= 2) btnMix.style.display = "inline-block";
-            statusMsg.innerText = `Track ${idx+1} adicionada.`;
         }
 
-        window.updateVol = (i, el) => {
-            layerVolumes[i] = el.value;
-            el.previousElementSibling.innerText = `Volume Track ${i+1}: ${Math.round(el.value*100)}%`;
-        };
+        window.updateVol = (i, el) => { layerVolumes[i] = el.value; el.previousElementSibling.innerText = `Vol: ${Math.round(el.value*100)}%`; };
 
         btnStart.onclick = () => {
             document.querySelectorAll('.player').forEach(p => { p.currentTime = 0; p.play(); });
-            mediaRecorder.start();
+            if (mediaRecorder) mediaRecorder.start();
             btnStart.disabled = true; btnStop.disabled = false;
-            statusMsg.innerText = "Gravando sincronizado...";
         };
 
         btnStop.onclick = () => {
-            mediaRecorder.stop();
+            if (mediaRecorder) mediaRecorder.stop();
             document.querySelectorAll('.player').forEach(p => p.pause());
             btnStart.disabled = false; btnStop.disabled = true;
         };
 
-        // Mixagem com alta compatibilidade (AAC + YUV420P)
         btnMix.onclick = async () => {
-            btnMix.innerText = "Carregando Motor..."; btnMix.disabled = true;
-            statusMsg.innerText = "Iniciando processamento...";
+            btnMix.disabled = true;
+            statusMsg.innerText = "Carregando motor FFmpeg...";
+            if (!ffmpeg.isLoaded()) await ffmpeg.load();
+
+            const num = layerBlobs.length;
+            let filter = "";
+            let inputs = [];
+
+            for (let i = 0; i < num; i++) {
+                const name = `in${i}.webm`;
+                ffmpeg.FS('writeFile', name, await fetchFile(layerBlobs[i]));
+                inputs.push("-i", name);
+                filter += `[${i}:v]scale=640:480,setpts=PTS-STARTPTS[v${i}]; [${i}:a]volume=${layerVolumes[i]}[a${i}];`;
+            }
+
+            let vMap = "";
+            for(let i=0; i<num; i++) vMap += `[v${i}]`;
+            let videoLayout = (num === 2) ? "hstack=inputs=2" : `xstack=inputs=${num}:layout=0_0|w0_0|0_h0|w0_h0`;
+            let audioLabels = "";
+            for(let i=0; i<num; i++) audioLabels += `[a${i}]`;
+
+            const fullFilter = `${filter}${vMap}${videoLayout}[v];${audioLabels}amix=inputs=${num}:duration=longest[a]`;
+
+            statusMsg.innerText = "Mixando... Mantenha a aba aberta.";
 
             try {
-                if (!ffmpeg.isLoaded()) await ffmpeg.load();
-               
-                let aFilter = "", aLabels = "", vInputs = "";
-                const num = layerBlobs.length;
-
-                for (let i = 0; i < num; i++) {
-                    const name = `i${i}.webm`;
-                    ffmpeg.FS('writeFile', name, await fetchFile(layerBlobs[i]));
-                    vInputs += `[${i}:v]`;
-                    aFilter += `[${i}:a]volume=${layerVolumes[i]}[a${i}];`;
-                    aLabels += `[a${i}]`;
-                }
-
-                let vFilter = num === 2 ? "[0:v][1:v]hstack=inputs=2[v]" : `${vInputs}xstack=inputs=${num}:layout=0_0|w0_0|0_h0|w0_h0[v]`;
-                const filterComplex = `${aFilter}${aLabels}amix=inputs=${num}[a];${vFilter}`;
-               
-                statusMsg.innerText = "Renderizando vídeo final (MP4)...";
-
                 await ffmpeg.run(
-                    ...Array.from({length: num}, (_, i) => ['-i', `i${i}.webm`]).flat(),
-                    '-filter_complex', filterComplex,
-                    '-map', '[v]', '-map', '[a]',
-                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
-                    '-pix_fmt', 'yuv420p',    // Essencial para Windows e QuickTime
-                    '-c:a', 'aac',            // Áudio universal
-                    '-b:a', '128k',           // Bitrate de áudio padrão
-                    '-movflags', '+faststart', // Otimiza para reprodução rápida
-                    'out.mp4'
+                    ...inputs,
+                    "-filter_complex", fullFilter,
+                    "-map", "[v]",
+                    "-map", "[a]",
+                    "-c:v", "libx264",
+                    "-c:a", "aac",
+                    "-pix_fmt", "yuv420p",
+                    "-r", "30",
+                    "-movflags", "+faststart",
+                    "-preset", "ultrafast",
+                    "final.mp4"
                 );
 
-                const data = ffmpeg.FS('readFile', 'out.mp4');
+                const data = ffmpeg.FS('readFile', 'final.mp4');
                 const link = document.createElement('a');
-                link.href = URL.createObjectURL(new Blob([data.buffer], {type:'video/mp4'}));
-                link.download = `guitar_colab_${Date.now()}.mp4`;
+                link.href = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+                link.download = "colab_guitar.mp4";
                 link.click();
-                statusMsg.innerText = "Download concluído!";
+               
+                for (let i = 0; i < num; i++) ffmpeg.FS('unlink', `in${i}.webm`);
+                ffmpeg.FS('unlink', 'final.mp4');
+               
+                statusMsg.innerText = "Pronto! Vídeo baixado.";
             } catch (e) {
                 console.error(e);
-                statusMsg.innerText = "Erro na mixagem. Verifique o console.";
+                statusMsg.innerText = "Erro durante a mixagem.";
             } finally {
-                btnMix.innerText = "Mixar Camadas (MP4)"; btnMix.disabled = false;
+                btnMix.disabled = false;
             }
         };
     </script>
