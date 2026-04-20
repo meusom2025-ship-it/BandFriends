@@ -2,35 +2,33 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Guitar Studio Pro - Vertical Edition</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Guitar Studio Pro - Mobile Fix</title>
     <script src="coi-serviceworker.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Arial, sans-serif; background: #121212; color: #e0e0e0; text-align: center; padding: 10px; }
-        #preview-container { margin-bottom: 20px; background: #000; display: inline-block; border-radius: 12px; overflow: hidden; border: 3px solid #333; position: relative; width: 90%; max-width: 360px; }
-        #live-preview { width: 100%; display: block; aspect-ratio: 9/16; object-fit: cover; }
-        .controls { margin: 15px; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
-        select, button, .btn-upload { padding: 10px; font-size: 13px; cursor: pointer; border-radius: 6px; border: none; font-weight: bold; background: #333; color: white; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #121212; color: #e0e0e0; text-align: center; padding: 10px; margin: 0; }
+        #preview-container { margin: 10px auto; background: #000; border-radius: 12px; overflow: hidden; border: 2px solid #333; width: 280px; height: 497px; position: relative; }
+        #live-preview { width: 100%; height: 100%; object-fit: cover; background: #000; }
+        .controls { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; padding: 10px; }
+        select, button, .btn-upload { padding: 12px; font-size: 14px; cursor: pointer; border-radius: 8px; border: none; font-weight: bold; background: #333; color: white; }
         #btn-start { background: #28a745; }
         #btn-stop { background: #dc3545; }
-        #btn-flip { background: #555; }
-        #btn-mix { background: #007bff; display: none; width: 100%; max-width: 300px; margin-top: 10px; }
+        #btn-mix { background: #007bff; display: none; width: 90%; margin: 10px auto; }
         .btn-upload { background: #6f42c1; text-decoration: none; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        #layers-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; max-width: 800px; margin: 20px auto; }
-        .layer-card { background: #1e1e1e; padding: 10px; border-radius: 10px; border: 1px solid #333; position: relative; }
+        #status-msg { color: #f39c12; font-size: 14px; margin: 10px; min-height: 1.5em; }
+        .setup-bar { background: #1a1a1a; padding: 10px; margin-bottom: 10px; display: flex; justify-content: center; gap: 10px; }
+        #layers-container { display: flex; overflow-x: auto; gap: 10px; padding: 10px; }
+        .layer-card { min-width: 120px; background: #1e1e1e; padding: 5px; border-radius: 8px; position: relative; }
         .layer-card video { width: 100%; border-radius: 4px; aspect-ratio: 9/16; object-fit: cover; }
-        .btn-delete { position: absolute; top: -5px; right: -5px; background: #dc3545; color: white; border-radius: 50%; width: 22px; height: 22px; border: none; cursor: pointer; z-index: 10; }
-        #status-msg { color: #f39c12; font-weight: bold; margin-top: 10px; font-size: 14px; }
-        .setup-bar { background: #1a1a1a; padding: 10px; border-radius: 8px; margin-bottom: 15px; }
+        .btn-delete { position: absolute; top: 0; right: 0; background: #dc3545; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; }
     </style>
 </head>
 <body>
 
-    <h1>Guitar Studio Pro</h1>
+    <h2 style="font-size: 18px; margin: 10px 0;">Guitar Studio Pro</h2>
    
     <div class="setup-bar">
-        <select id="audio-source"></select>
+        <select id="audio-source" style="max-width: 150px;"></select>
         <button id="btn-flip">Inverter 🔄</button>
     </div>
 
@@ -38,21 +36,23 @@
         <video id="live-preview" autoplay muted playsinline></video>
     </div>
 
+    <div id="status-msg">Clique em "Gravar" para iniciar</div>
+
     <div class="controls">
         <button id="btn-start">Gravar</button>
         <button id="btn-stop" disabled>Parar</button>
         <label for="file-upload" class="btn-upload">Upload</label>
         <input type="file" id="file-upload" accept="video/*" style="display:none">
-        <button id="btn-mix">Gerar Vídeo Vertical (Reels/TikTok)</button>
     </div>
+
+    <button id="btn-mix">Gerar Vídeo Vertical</button>
    
-    <div id="status-msg">Pronto para gravar...</div>
     <div id="layers-container"></div>
 
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js"></script>
     <script>
         const { createFFmpeg, fetchFile } = FFmpeg;
-        const ffmpeg = createFFmpeg({ log: true, corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js' });
+        const ffmpeg = createFFmpeg({ log: false, corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js' });
 
         let mediaRecorder, recordedChunks = [], layerBlobs = [], layerVolumes = [];
         let currentStream, currentFacingMode = 'user';
@@ -60,7 +60,6 @@
         const livePreview = document.getElementById('live-preview');
         const audioSelect = document.getElementById('audio-source');
         const statusMsg = document.getElementById('status-msg');
-        const btnMix = document.getElementById('btn-mix');
 
         async function getDevices() {
             try {
@@ -69,31 +68,60 @@
                 devices.filter(d => d.kind === 'audioinput').forEach(d => {
                     const opt = document.createElement('option');
                     opt.value = d.deviceId;
-                    opt.text = d.label || `Entrada ${audioSelect.length + 1}`;
+                    opt.text = d.label || `Microfone ${audioSelect.length + 1}`;
                     audioSelect.appendChild(opt);
                 });
             } catch (e) { console.error(e); }
         }
 
         async function initStream() {
-            if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+            if (currentStream) {
+                currentStream.getTracks().forEach(t => t.stop());
+            }
+
             const constraints = {
-                video: { facingMode: currentFacingMode, width: 1080, height: 1920 },
-                audio: { deviceId: audioSelect.value ? { exact: audioSelect.value } : undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                video: {
+                    facingMode: currentFacingMode,
+                    width: { ideal: 720 },
+                    height: { ideal: 1280 }
+                },
+                audio: {
+                    deviceId: audioSelect.value ? { exact: audioSelect.value } : undefined,
+                    echoCancellation: false,
+                    noiseSuppression: false
+                }
             };
+
             try {
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 currentStream = stream;
                 livePreview.srcObject = stream;
+                livePreview.setAttribute('playsinline', true);
+                livePreview.play();
+               
                 mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8,opus' });
                 mediaRecorder.ondataavailable = e => { if(e.data.size > 0) recordedChunks.push(e.data); };
                 mediaRecorder.onstop = () => { addLayer(new Blob(recordedChunks, {type:'video/webm'})); recordedChunks = []; };
+               
                 if(audioSelect.options.length <= 1) await getDevices();
-            } catch (err) { statusMsg.innerText = "Câmera indisponível."; }
+                statusMsg.innerText = "Câmera ativa!";
+            } catch (err) {
+                statusMsg.innerText = "Erro: Permita o acesso à câmera.";
+                console.error(err);
+            }
         }
 
-        document.getElementById('file-upload').addEventListener('change', function(e) {
-            if (e.target.files[0]) { addLayer(e.target.files[0]); this.value = ''; }
+        // Eventos
+        document.getElementById('file-upload').onchange = (e) => { if(e.target.files[0]) addLayer(e.target.files[0]); };
+        document.getElementById('btn-flip').onclick = () => {
+            currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+            initStream();
+        };
+        audioSelect.onchange = initStream;
+
+        // Início
+        window.addEventListener('load', () => {
+            initStream();
         });
 
         function addLayer(blob) {
@@ -116,27 +144,18 @@
                 card.className = 'layer-card';
                 card.innerHTML = `
                     <button class="btn-delete" onclick="removeLayer(${i})">X</button>
-                    <video src="${URL.createObjectURL(blob)}" controls></video>
-                    <label style="display:block;margin-top:5px;font-size:11px">Volume: ${Math.round(layerVolumes[i]*100)}%</label>
+                    <video src="${URL.createObjectURL(blob)}" playsinline></video>
                     <input type="range" min="0" max="2" step="0.1" value="${layerVolumes[i]}" oninput="updateVol(${i}, this)" style="width:100%">
                 `;
                 container.appendChild(card);
             });
-            btnMix.style.display = layerBlobs.length >= 2 ? "inline-block" : "none";
+            document.getElementById('btn-mix').style.display = layerBlobs.length >= 2 ? "block" : "none";
         }
 
-        window.updateVol = (i, el) => { layerVolumes[i] = el.value; el.previousElementSibling.innerText = `Volume: ${Math.round(el.value*100)}%`; };
-
-        audioSelect.onchange = initStream;
-        document.getElementById('btn-flip').onclick = () => {
-            currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
-            initStream();
-        };
-
-        navigator.mediaDevices.getUserMedia({ audio: true, video: true }).then(() => getDevices().then(initStream));
+        window.updateVol = (i, el) => { layerVolumes[i] = el.value; };
 
         document.getElementById('btn-start').onclick = () => {
-            document.querySelectorAll('video').forEach(v => { if(v.id !== 'live-preview') { v.currentTime = 0; v.play(); } });
+            document.querySelectorAll('.layer-card video').forEach(v => { v.currentTime = 0; v.play(); });
             if(mediaRecorder) mediaRecorder.start();
             document.getElementById('btn-start').disabled = true;
             document.getElementById('btn-stop').disabled = false;
@@ -147,43 +166,40 @@
             if(mediaRecorder) mediaRecorder.stop();
             document.getElementById('btn-start').disabled = false;
             document.getElementById('btn-stop').disabled = true;
-            statusMsg.innerText = "Processando camada...";
+            statusMsg.innerText = "Camada salva.";
         };
 
-        btnMix.onclick = async () => {
-            btnMix.disabled = true;
-            statusMsg.innerText = "Renderizando Vertical (HD)...";
+        document.getElementById('btn-mix').onclick = async () => {
+            const btn = document.getElementById('btn-mix');
+            btn.disabled = true;
+            statusMsg.innerText = "Processando vídeo (pode demorar)...";
             if (!ffmpeg.isLoaded()) await ffmpeg.load();
            
             const num = layerBlobs.length;
             let filter = "";
             let inputs = [];
-           
-            // Altura de cada pedaço do vídeo para caber no 1920 total
-            const segmentHeight = Math.floor(1920 / num);
+            const segmentHeight = Math.floor(1280 / num);
 
             for (let i = 0; i < num; i++) {
                 const name = `in${i}.webm`;
                 ffmpeg.FS('writeFile', name, await fetchFile(layerBlobs[i]));
                 inputs.push("-i", name);
-                // Redimensiona para cobrir 1080 de largura e corta para a altura proporcional
-                filter += `[${i}:v]scale=1080:-1,crop=1080:${segmentHeight},setpts=PTS-STARTPTS[v${i}]; [${i}:a]volume=${layerVolumes[i]}[a${i}];`;
+                filter += `[${i}:v]scale=720:-1,crop=720:${segmentHeight},setpts=PTS-STARTPTS[v${i}]; [${i}:a]volume=${layerVolumes[i]}[a${i}];`;
             }
 
             let vMap = ""; for(let i=0; i<num; i++) vMap += `[v${i}]`;
             let aLabels = ""; for(let i=0; i<num; i++) aLabels += `[a${i}]`;
-
             const fullFilter = `${filter}${vMap}vstack=inputs=${num}[v];${aLabels}amix=inputs=${num}:duration=longest[a]`;
 
             try {
-                await ffmpeg.run(...inputs, "-filter_complex", fullFilter, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-r", "30", "-movflags", "+faststart", "-preset", "ultrafast", "social.mp4");
-                const data = ffmpeg.FS('readFile', 'social.mp4');
+                await ffmpeg.run(...inputs, "-filter_complex", fullFilter, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-r", "30", "-preset", "ultrafast", "out.mp4");
+                const data = ffmpeg.FS('readFile', 'out.mp4');
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
-                link.download = `reels_guitar_${Date.now()}.mp4`;
+                link.download = "social_guitar.mp4";
                 link.click();
-                statusMsg.innerText = "Vídeo gerado para Redes Sociais!";
-            } catch (e) { statusMsg.innerText = "Erro na renderização."; } finally { btnMix.disabled = false; }
+                statusMsg.innerText = "Vídeo baixado!";
+            } catch (e) { statusMsg.innerText = "Erro ao mixar."; } finally { btn.disabled = false; }
         };
     </script>
 </body>
