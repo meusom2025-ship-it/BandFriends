@@ -166,12 +166,12 @@
                 const name = `in${i}.webm`;
                 ffmpeg.FS('writeFile', name, await fetchFile(layerBlobs[i]));
                 inputs.push("-i", name);
-                // Aumentando a escala para 640x480 para maior clareza no mosaico
-                filter += `[${i}:v]scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS[v${i}]; [${i}:a]volume=${layerVolumes[i]}[a${i}];`;
+                // Aumentando a escala para 1024x768 para maior clareza no mosaico
+                filter += `[${i}:v]scale=1024:768:force_original_aspect_ratio=decrease,pad=1024:768:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS[v${i}]; [${i}:a]volume=${layerVolumes[i]}[a${i}];`;
             }
 
             let vMap = ""; for(let i=0; i<num; i++) vMap += `[v${i}]`;
-            let videoLayout = (num === 2) ? "hstack=inputs=2" : `xstack=inputs=${num}:layout=0_0|w0_0|0_h0|w0_h0`;
+            let videoLayout = (num === 2) ? "vstack=inputs=2" : `xstack=inputs=${num}:layout=0_0|w0_0|0_h0|w0_h0`;
             let aLabels = ""; for(let i=0; i<num; i++) aLabels += `[a${i}]`;
 
             const fullFilter = `${filter}${vMap}${videoLayout}[v];${aLabels}amix=inputs=${num}:duration=longest[a]`;
