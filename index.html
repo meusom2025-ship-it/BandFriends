@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Guitar Studio Pro - 1024x768 Fix</title>
+    <title>Guitar Studio Pro - Volume Fix Final</title>
     <script src="coi-serviceworker.js"></script>
     <style>
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #121212; color: #e0e0e0; text-align: center; padding: 20px; }
@@ -103,7 +103,7 @@
 
         function addLayer(blob) {
             layerBlobs.push(blob);
-            layerVolumes.push(1.0); // Inicializa volume em 100%
+            layerVolumes.push(1.0);
             renderLayers();
         }
 
@@ -169,15 +169,17 @@
                 const name = `in${i}.webm`;
                 ffmpeg.FS('writeFile', name, await fetchFile(layerBlobs[i]));
                 inputs.push("-i", name);
-                // Alterado para 1024x768 conforme solicitado
-                filter += `[${i}:v]scale=1024:768:force_original_aspect_ratio=decrease,pad=1024:768:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS[v${i}]; [${i}:a]volume=${layerVolumes[i]}[a${i}];`;
+                // 1024x768 e Volume ajustado INDIVIDUALMENTE antes do mix
+                filter += `[${i}:v]scale=1024:768:force_original_aspect_ratio=decrease,pad=1024:768:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS[v${i}]; [${i}:a]volume=${layerVolumes[i].toFixed(2)}[a${i}];`;
             }
 
             let vMap = ""; for(let i=0; i<num; i++) vMap += `[v${i}]`;
-            let videoLayout = (num === 2) ? "hstack=inputs=2" : `xstack=inputs=${num}:layout=0_0|w0_0|0_h0|w0_h0`;
             let aLabels = ""; for(let i=0; i<num; i++) aLabels += `[a${i}]`;
+           
+            let videoLayout = (num === 2) ? "hstack=inputs=2" : `xstack=inputs=${num}:layout=0_0|w0_0|0_h0|w0_h0`;
 
-            const fullFilter = `${filter}${vMap}${videoLayout}[v];${aLabels}amix=inputs=${num}:duration=longest[a]`;
+            // amix=dropout_transition=0 impede que o volume caia quando uma faixa acaba
+            const fullFilter = `${filter}${vMap}${videoLayout}[v];${aLabels}amix=inputs=${num}:duration=longest:dropout_transition=0,volume=${num}[a]`;
 
             try {
                 await ffmpeg.run(...inputs, "-filter_complex", fullFilter, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-r", "30", "-preset", "ultrafast", "final.mp4");
