@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Guitar Studio Pro - Mosaico Original</title>
+    <title>Guitar Studio Pro - Audio Sync Fix</title>
     <script src="coi-serviceworker.js"></script>
     <style>
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #121212; color: #e0e0e0; text-align: center; padding: 20px; }
@@ -103,7 +103,7 @@
 
         function addLayer(blob) {
             layerBlobs.push(blob);
-            layerVolumes.push(1);
+            layerVolumes.push(1.0);
             renderLayers();
         }
 
@@ -130,7 +130,10 @@
             btnMix.style.display = layerBlobs.length >= 2 ? "inline-block" : "none";
         }
 
-        window.updateVol = (i, el) => { layerVolumes[i] = el.value; el.previousElementSibling.innerText = `Vol: ${Math.round(el.value*100)}%`; };
+        window.updateVol = (i, el) => {
+            layerVolumes[i] = parseFloat(el.value);
+            el.previousElementSibling.innerText = `Vol: ${Math.round(layerVolumes[i]*100)}%`;
+        };
 
         audioSelect.onchange = initStream;
         document.getElementById('btn-flip').onclick = () => {
@@ -155,7 +158,7 @@
 
         btnMix.onclick = async () => {
             btnMix.disabled = true;
-            statusMsg.innerText = "Processando com FFmpeg...";
+            statusMsg.innerText = "Mixando Áudio e Vídeo...";
             if (!ffmpeg.isLoaded()) await ffmpeg.load();
 
             const num = layerBlobs.length;
@@ -166,25 +169,31 @@
                 const name = `in${i}.webm`;
                 ffmpeg.FS('writeFile', name, await fetchFile(layerBlobs[i]));
                 inputs.push("-i", name);
-                // Aumentando a escala para 640x480 para maior clareza no mosaico
-                filter += `[${i}:v]scale=1024:768:force_original_aspect_ratio=decrease,pad=1024:768:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS[v${i}]; [${i}:a]volume=${layerVolumes[i]}[a${i}];`;
+                // Filtro de áudio robusto: resample para 44k + volume slider
+                filter += `[${i}:v]scale=1024:768:force_original_aspect_ratio=decrease,pad=1024:768:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS[v${i}]; [${i}:a]aresample=44100,volume=${layerVolumes[i].toFixed(2)}[a${i}];`;
             }
 
             let vMap = ""; for(let i=0; i<num; i++) vMap += `[v${i}]`;
-            let videoLayout = (num === 2) ? "hstack=inputs=2" : `xstack=inputs=${num}:layout=0_0|w0_0|0_h0|w0_h0`;
             let aLabels = ""; for(let i=0; i<num; i++) aLabels += `[a${i}]`;
+            let videoLayout = (num === 2) ? "hstack=inputs=2" : `xstack=inputs=${num}:layout=0_0|w0_0|0_h0|w0_h0`;
 
-            const fullFilter = `${filter}${vMap}${videoLayout}[v];${aLabels}amix=inputs=${num}:duration=longest[a]`;
+            // amix com dropout_transition=0 e volume compensado para evitar perda de ganho
+            const fullFilter = `${filter}${vMap}${videoLayout}[v];${aLabels}amix=inputs=${num}:duration=longest:dropout_transition=0:normalize=0,volume=${num}[a]`;
 
             try {
-                await ffmpeg.run(...inputs, "-filter_complex", fullFilter, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-r", "30", "-preset", "ultrafast", "final.mp4");
+                await ffmpeg.run(...inputs, "-filter_complex", fullFilter, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p", "-r", "30", "-preset", "ultrafast", "final.mp4");
                 const data = ffmpeg.FS('readFile', 'final.mp4');
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
-                link.download = `colab_guitar_${Date.now()}.mp4`;
+                link.download = `colab_guitar_sync_${Date.now()}.mp4`;
                 link.click();
                 statusMsg.innerText = "Download concluído!";
-            } catch (e) { statusMsg.innerText = "Erro na mixagem."; } finally { btnMix.disabled = false; }
+            } catch (e) {
+                console.error(e);
+                statusMsg.innerText = "Erro na mixagem de áudio.";
+            } finally {
+                btnMix.disabled = false;
+            }
         };
     </script>
 </body>
