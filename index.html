@@ -126,7 +126,7 @@
                 const name = `in${i}.webm`;
                 ffmpeg.FS('writeFile', name, await fetchFile(layerBlobs[i]));
                 inputs.push("-i", name);
-                filter += `[${i}:v]scale=640:480,setpts=PTS-STARTPTS[v${i}]; [${i}:a]volume=${layerVolumes[i]}[a${i}];`;
+                filter += `[${i}:v]scale=1024:768,setpts=PTS-STARTPTS[v${i}]; [${i}:a]volume=${layerVolumes[i]}[a${i}];`;
             }
 
             let vMap = "";
